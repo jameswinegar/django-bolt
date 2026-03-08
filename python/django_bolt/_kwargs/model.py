@@ -476,10 +476,10 @@ async def build_handler_arguments(
 
 
 # Pre-allocated constant for no-params handlers (zero alloc per request)
-_NO_PARAMS: tuple[tuple[()], dict[str, Any]] = ((), {})
+_NO_PARAMS: tuple[list[Any], dict[str, Any]] = ([], {})
 
 
-def _injector_no_params(request: Any) -> tuple[tuple[()], dict[str, Any]]:
+def _injector_no_params(request: Any) -> tuple[list[Any], dict[str, Any]]:
     return _NO_PARAMS
 
 
