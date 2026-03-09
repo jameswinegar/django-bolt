@@ -482,7 +482,7 @@ _EMPTY_FORM_FILES: tuple[dict, dict] = ({}, {})
 _UNRESOLVED = object()  # Sentinel for unresolved parallel dependency slots
 
 
-def _injector_no_params(request: Any) -> tuple[list[Any], dict[str, Any]]:
+def _injector_no_params(request: Any) -> tuple[tuple[()], dict[str, Any]]:
     return _NO_PARAMS
 
 
