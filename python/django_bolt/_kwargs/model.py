@@ -256,12 +256,17 @@ def compile_binder(fn: Callable, http_method: str, path: str) -> HandlerMetadata
 
     # Static analysis: Determine which request components are actually used
     # This allows skipping unused parsing at request time
-    meta["needs_body"] = any(f.source in ("body", "form", "file") for f in field_definitions)
-    meta["needs_query"] = any(f.source == "query" for f in field_definitions)
+    #
+    # When a handler has a `request` parameter, it can access any request
+    # attribute at runtime (request.headers, request.body, etc.), so we must
+    # populate all components. We can only optimize when no request param exists.
+    has_request_param = any(f.source == "request" for f in field_definitions)
+    meta["needs_body"] = has_request_param or any(f.source in ("body", "form", "file") for f in field_definitions)
+    meta["needs_query"] = has_request_param or any(f.source == "query" for f in field_definitions)
     # Note: Form/File parsing depends on Content-Type header, so needs_headers must include form handlers
-    meta["needs_headers"] = any(f.source == "header" for f in field_definitions) or needs_form_parsing
-    meta["needs_cookies"] = any(f.source == "cookie" for f in field_definitions)
-    meta["needs_path_params"] = any(f.source == "path" for f in field_definitions)
+    meta["needs_headers"] = has_request_param or any(f.source == "header" for f in field_definitions) or needs_form_parsing
+    meta["needs_cookies"] = has_request_param or any(f.source == "cookie" for f in field_definitions)
+    meta["needs_path_params"] = has_request_param or any(f.source == "path" for f in field_definitions)
 
     # Static route detection: routes without path params can use O(1) lookup
     meta["is_static_route"] = len(path_params) == 0
@@ -388,10 +393,11 @@ def compile_websocket_binder(fn: Callable, path: str) -> HandlerMetadata:
     meta["mode"] = "mixed"
     meta["needs_form_parsing"] = False  # WebSocket doesn't have form data
     meta["needs_body"] = False  # WebSocket doesn't have body at connect
-    meta["needs_query"] = any(f.source == "query" for f in field_definitions)
-    meta["needs_headers"] = any(f.source == "header" for f in field_definitions)
-    meta["needs_cookies"] = any(f.source == "cookie" for f in field_definitions)
-    meta["needs_path_params"] = any(f.source == "path" for f in field_definitions)
+    has_request_param = any(f.source == "request" for f in field_definitions)
+    meta["needs_query"] = has_request_param or any(f.source == "query" for f in field_definitions)
+    meta["needs_headers"] = has_request_param or any(f.source == "header" for f in field_definitions)
+    meta["needs_cookies"] = has_request_param or any(f.source == "cookie" for f in field_definitions)
+    meta["needs_path_params"] = has_request_param or any(f.source == "path" for f in field_definitions)
     meta["is_static_route"] = len(path_params) == 0
 
     # Classify pattern for injector optimization
