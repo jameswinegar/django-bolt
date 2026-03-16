@@ -626,7 +626,7 @@ async fn handle_test_request_internal(
     use crate::handler::{extract_headers, handle_python_error};
     use crate::middleware;
     use crate::middleware::auth::populate_auth_context;
-    use crate::request::PyRequest;
+    use crate::request::{LazyRequestData, PyRequest};
     use crate::responses;
     use crate::router::parse_query_string;
     use crate::validation::{parse_cookies_inline, validate_auth_and_guards, AuthGuardResult};
@@ -714,11 +714,22 @@ async fn handle_test_request_internal(
     // Get route metadata
     let route_meta = route_metadata.get(handler_id).cloned();
 
+    let has_request_param = route_meta
+        .as_ref()
+        .map(|m| m.plan.has_request_param())
+        .unwrap_or(false);
+
     // Parse query string
     let needs_query = route_meta
         .as_ref()
         .map(|m| m.plan.needs_query())
         .unwrap_or(true);
+    // Capture raw query string for lazy access when handler has request param
+    let raw_query_string: Option<String> = if has_request_param && !needs_query {
+        req.uri().query().map(|q| q.to_string())
+    } else {
+        None
+    };
     let query_params = if needs_query {
         req.uri().query().and_then(|q| {
             let parsed = parse_query_string(q);
@@ -808,7 +819,7 @@ async fn handle_test_request_internal(
         .as_ref()
         .map(|m| m.plan.needs_cookies())
         .unwrap_or(true);
-    let cookies = if needs_cookies {
+    let cookies = if needs_cookies || has_request_param {
         parse_cookies_inline(headers.get("cookie").map(|s| s.as_str()))
     } else {
         AHashMap::new()
@@ -942,9 +953,9 @@ async fn handle_test_request_internal(
         };
 
         let headers_for_python = if needs_headers {
-            headers.clone()
+            Some(headers.clone())
         } else {
-            AHashMap::new()
+            None
         };
 
         // Get param_types from route metadata for typed conversion
@@ -983,8 +994,15 @@ async fn handle_test_request_internal(
             None
         };
 
-        let headers_dict = params_to_py_dict(py, &headers_for_python, &param_types)?;
-        let cookies_dict = params_to_py_dict(py, &cookies, &param_types)?;
+        let headers_dict = match &headers_for_python {
+            Some(h) => Some(params_to_py_dict(py, h, &param_types)?),
+            None => None,
+        };
+        let cookies_dict = if needs_cookies {
+            Some(params_to_py_dict(py, &cookies, &param_types)?)
+        } else {
+            None
+        };
 
         // Only create state dict when Rust-side prebound args exist (matches production).
         let state_lock = std::sync::OnceLock::new();
@@ -1001,13 +1019,21 @@ async fn handle_test_request_internal(
                 Some(d) => d.bind(py),
                 None => &empty_dict,
             };
+            let hd_ref = match &headers_dict {
+                Some(d) => d,
+                None => &empty_dict,
+            };
+            let ck_ref = match &cookies_dict {
+                Some(d) => d,
+                None => &empty_dict,
+            };
             if let Some((pre_args, pre_kwargs)) = build_prebound_args_kwargs(
                 py,
                 bindings,
                 pp_ref,
                 qp_ref,
-                &headers_dict,
-                &cookies_dict,
+                hd_ref,
+                ck_ref,
             ) {
                 let state_dict = PyDict::new(py);
                 state_dict.set_item("_bolt_prebound_args", pre_args)?;
@@ -1025,14 +1051,34 @@ async fn handle_test_request_internal(
             (None, None)
         };
 
+        // Build lazy request data for handlers with `request` param.
+        let lazy = if has_request_param {
+            let raw_headers = if !needs_headers { Some(headers.clone()) } else { None };
+            let raw_cookies = if !needs_cookies { Some(cookies.clone()) } else { None };
+            if raw_query_string.is_some() || raw_headers.is_some() || raw_cookies.is_some() {
+                Some(Box::new(LazyRequestData {
+                    raw_query_string,
+                    raw_headers,
+                    raw_cookies,
+                    query_cache: std::sync::OnceLock::new(),
+                    headers_cache: std::sync::OnceLock::new(),
+                    cookies_cache: std::sync::OnceLock::new(),
+                }))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let request = PyRequest {
             method: method.to_string(),
             path: path.to_string(),
             body: body.to_vec(),
             path_params: path_params_dict,
             query_params: query_params_dict,
-            headers: Some(headers_dict.unbind()),
-            cookies: Some(cookies_dict.unbind()),
+            headers: headers_dict.map(|d| d.unbind()),
+            cookies: cookies_dict.map(|d| d.unbind()),
             context,
             user: None,
             state: state_lock,
@@ -1042,6 +1088,7 @@ async fn handle_test_request_internal(
             conn_host: conn_host.clone(),
             conn_scheme: conn_scheme.clone(),
             conn_remote_addr: conn_remote_addr.clone(),
+            lazy,
         };
         let request_obj = Py::new(py, request)?;
 
