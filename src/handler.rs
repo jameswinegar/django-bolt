@@ -1149,7 +1149,6 @@ pub async fn handle_request<const ACCESS_LOG: bool>(
             conn_host,
             conn_scheme,
             conn_remote_addr,
-            lazy: None,
         };
         let request_obj = Py::new(py, request)?;
 

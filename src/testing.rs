@@ -1052,7 +1052,6 @@ async fn handle_test_request_internal(
             conn_host: conn_host.clone(),
             conn_scheme: conn_scheme.clone(),
             conn_remote_addr: conn_remote_addr.clone(),
-            lazy: None,
         };
         let request_obj = Py::new(py, request)?;
 
