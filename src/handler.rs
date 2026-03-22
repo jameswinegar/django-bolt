@@ -24,7 +24,7 @@ use crate::form_parsing::{
 use crate::metadata::{RustArgBinding, RustArgSource};
 use crate::middleware;
 use crate::middleware::auth::populate_auth_context;
-use crate::request::{LazyRequestData, PyRequest};
+use crate::request::PyRequest;
 use crate::request_pipeline::validate_and_cache_typed_params;
 use crate::response_builder;
 use crate::response_meta::ResponseMeta;
@@ -540,7 +540,11 @@ async fn build_response_from_parsed(
         ResponseWireBody::FilePath(file_path) => {
             let headers = response_builder::meta_to_headers(meta_ref);
             let mut response = build_file_response(
-                &file_path, parsed.status, headers, skip_compression, is_head_request,
+                &file_path,
+                parsed.status,
+                headers,
+                skip_compression,
+                is_head_request,
             )
             .await;
             mark_skip_cors(&mut response, skip_cors);
@@ -555,7 +559,9 @@ async fn build_response_from_parsed(
             if media_type == "text/event-stream" {
                 if is_head_request {
                     let mut response = response_builder::build_sse_response(
-                        parsed.status, headers, skip_compression,
+                        parsed.status,
+                        headers,
+                        skip_compression,
                     )
                     .body(Vec::<u8>::new());
                     mark_skip_cors(&mut response, skip_cors);
@@ -768,16 +774,7 @@ pub async fn handle_request<const ACCESS_LOG: bool>(
     // All subsequent flag reads are direct bit-tests, avoiding repeated Option::map closures.
     let plan = route_metadata.map(|m| m.plan);
 
-    let has_request_param = plan.map_or(false, |p| p.has_request_param());
-
     let needs_query = plan.map_or(true, |p| p.needs_query());
-    // Capture raw query string for lazy access when handler has request param
-    // but no typed query params. Cheap: just a string copy from URL, no parsing.
-    let raw_query_string: Option<String> = if has_request_param && !needs_query {
-        req.uri().query().map(|q| q.to_string())
-    } else {
-        None
-    };
     let query_params = if needs_query {
         req.uri().query().and_then(|q| {
             let parsed = parse_query_string(q);
@@ -816,8 +813,7 @@ pub async fn handle_request<const ACCESS_LOG: bool>(
         || needs_cookies
         || needs_form_parsing
         || has_route_auth_or_guards
-        || has_route_rate_limit
-        || has_request_param;
+        || has_route_rate_limit;
     let skip_cors = plan.map_or(false, |p| p.skip_cors());
     let skip_compression = plan.map_or(false, |p| p.skip_compression());
     let can_sync_dispatch = plan.map_or(false, |p| p.can_sync_dispatch());
@@ -888,9 +884,9 @@ pub async fn handle_request<const ACCESS_LOG: bool>(
         None
     };
 
-    // Optimization: Only parse cookies if handler needs them (or has request param for lazy access)
+    // Optimization: Only parse cookies if handler needs them
     // Cookie parsing can be expensive for requests with many cookies
-    let cookies = if needs_cookies || has_request_param {
+    let cookies = if needs_cookies {
         Some(parse_cookies_inline(
             headers
                 .as_ref()
@@ -942,7 +938,7 @@ pub async fn handle_request<const ACCESS_LOG: bool>(
     // Read body from payload only when needed.
     // For multipart, we need the payload stream directly.
     let (body, form_result): (Vec<u8>, Option<FormParseResult>) =
-        if !needs_body && !needs_form_parsing && !has_request_param {
+        if !needs_body && !needs_form_parsing {
             (Vec::new(), None)
         } else if needs_form_parsing && is_multipart {
             // Multipart form parsing - uses the payload stream directly
@@ -1134,28 +1130,6 @@ pub async fn handle_request<const ACCESS_LOG: bool>(
             (None, None)
         };
 
-        // Build lazy request data for handlers with `request` param.
-        // Stores raw Rust data for components not eagerly converted to PyDicts,
-        // enabling zero-cost deferred access via OnceLock.
-        let lazy = if has_request_param {
-            let raw_headers = if !needs_headers { headers } else { None };
-            let raw_cookies = if !needs_cookies { cookies } else { None };
-            if raw_query_string.is_some() || raw_headers.is_some() || raw_cookies.is_some() {
-                Some(Box::new(LazyRequestData {
-                    raw_query_string,
-                    raw_headers,
-                    raw_cookies,
-                    query_cache: std::sync::OnceLock::new(),
-                    headers_cache: std::sync::OnceLock::new(),
-                    cookies_cache: std::sync::OnceLock::new(),
-                }))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         // OPTIMIZATION: Move owned strings into PyRequest — no .clone() needed.
         // Error paths reconstruct from req.method()/req.path() (cold path, HttpRequest still alive).
         let request = PyRequest {
@@ -1175,7 +1149,7 @@ pub async fn handle_request<const ACCESS_LOG: bool>(
             conn_host,
             conn_scheme,
             conn_remote_addr,
-            lazy,
+            lazy: None,
         };
         let request_obj = Py::new(py, request)?;
 

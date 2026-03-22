@@ -254,14 +254,9 @@ def compile_binder(fn: Callable, http_method: str, path: str) -> HandlerMetadata
     # Check both direct File() params and Form() structs with UploadFile fields
     meta["has_file_uploads"] = any(f.source == "file" or field_has_upload_file(f) for f in field_definitions)
 
-    # Static analysis: Determine which request components are actually used
-    # This allows skipping unused parsing at request time
-    #
-    # When a handler has a `request` parameter, Rust stores raw data for lazy
-    # PyDict creation (via LazyRequestData). The needs_* flags only reflect
-    # typed param requirements — Rust handles lazy access separately.
-    has_request_param = any(f.source == "request" for f in field_definitions)
-    meta["has_request_param"] = has_request_param
+    # Static analysis: Determine which request components are actually used.
+    # These start with typed-param requirements; api.py augments them with
+    # AST-detected request.body/query/headers/cookies usage when needed.
     meta["needs_body"] = any(f.source in ("body", "form", "file") for f in field_definitions)
     meta["needs_query"] = any(f.source == "query" for f in field_definitions)
     # Note: Form/File parsing depends on Content-Type header, so needs_headers must include form handlers
@@ -394,8 +389,6 @@ def compile_websocket_binder(fn: Callable, path: str) -> HandlerMetadata:
     meta["mode"] = "mixed"
     meta["needs_form_parsing"] = False  # WebSocket doesn't have form data
     meta["needs_body"] = False  # WebSocket doesn't have body at connect
-    has_request_param = any(f.source == "request" for f in field_definitions)
-    meta["has_request_param"] = has_request_param
     meta["needs_query"] = any(f.source == "query" for f in field_definitions)
     meta["needs_headers"] = any(f.source == "header" for f in field_definitions)
     meta["needs_cookies"] = any(f.source == "cookie" for f in field_definitions)
