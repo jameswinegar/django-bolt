@@ -169,3 +169,5 @@ Python 3.12, 3.13, 3.14 (CPython and PyPy), and the free-threaded build of CPyth
  ]
 }
 </script>
+
+Scratch line to probe the doc-only CI gate. Do not merge.

@@ -167,3 +167,5 @@ A maintainer will review your PR. Please be patient — and feel free to ping on
 - 📖 [Documentation](https://bolt.farhana.li/)
 
 By contributing, you agree that your contributions will be licensed under the project's MIT License.
+
+Scratch line to probe the doc-only CI gate. Do not merge.
