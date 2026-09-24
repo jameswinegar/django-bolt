@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - **The CI test matrix is derived from the `pyproject.toml` classifiers** - The Django axis is now read from the `Framework :: Django :: X.Y` classifiers, as the Python axis already was. The declared support matrix and the versions actually tested can no longer disagree. A new `support-matrix` workflow checks those classifiers against [endoflife.date](https://endoflife.date) every week. It opens an issue when a series goes end of life, or when a new one ships. Run `python scripts/check_support_matrix.py` to check locally.
+- **CI skips the build and test jobs on doc-only pull requests** - A new `changes` job reads the files that a pull request changes. When each file is under `docs/` or is a `.md` file, the wheel, test, integration, and audit jobs skip. `README.md` and `python/bolt-mcp/README.md` are package inputs, so a change to them runs the full pipeline. Pushes to `master`, `v*` tags, and manual runs always run the full pipeline. A new `CI OK` job passes when each job succeeds or skips, and it fails on each other result. Make `CI OK` the one required check. A pull request that changes `docs/`, `uv.lock`, or `pyproject.toml` now also builds the documentation site with the locked `docs` group. A broken docs build thus fails before the merge.
 
 ### Performance
 
