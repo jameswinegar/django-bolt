@@ -342,3 +342,5 @@ Django-Bolt stands on the shoulders of giants:
 ## 📄 License
 
 Django-Bolt is released under the [MIT License](https://opensource.org/licenses/MIT).
+
+<!-- Scratch line to probe the doc-only CI gate. Do not merge. -->
